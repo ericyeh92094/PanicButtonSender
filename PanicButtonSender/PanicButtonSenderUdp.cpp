@@ -11,9 +11,7 @@
 
 #define SERVER "testnode1231231.azurewebsites.net"  //ip address of udp server
 #define BUFLEN 512  //Max length of buffer
-#define PORT 80   //The port on which to listen for incoming data
-
-using namespace std;
+#define PORT 30301   //The port on which to listen for incoming data
 
 int socket_set_keepalive(int s)
 {
@@ -50,25 +48,12 @@ bool key_pressed(int key) {
 	return (GetAsyncKeyState(key) & 0x8000 != 0);
 }
 
-int main(int argc, char* argv[])
+int main(void)
 {
 	struct sockaddr_in si_other;
 	int s, slen = sizeof(si_other), stcp;
 	char buf[BUFLEN];
 	WSADATA wsa;
-
-	if (argc < 3)
-		exit(EXIT_FAILURE);
-
-	char server_url[_MAX_PATH];
-	int button_id = 0;
-	strcpy(server_url, argv[1]);
-	button_id = atoi(argv[2]);
-
-	char *format_string = "PUT /error/%d HTTP/1.1\r\nHost: %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-	char put_string[_MAX_PATH];
-
-	sprintf(put_string, format_string, button_id, server_url);
 
 	//Initialise winsock
 	printf("\nInitialising Winsock...");
@@ -94,38 +79,19 @@ int main(int argc, char* argv[])
 	}
 
 	//setup address structure
-	struct hostent *host;
-	host = gethostbyname(server_url);
-
 	memset((char *)&si_other, 0, sizeof(si_other));
 	si_other.sin_family = AF_INET;
 	si_other.sin_port = htons(PORT);
-	si_other.sin_addr.s_addr = *((unsigned long*)host->h_addr); //inet_addr(SERVER);
+	si_other.sin_addr.S_un.S_addr = inet_addr(SERVER);
 
-	//create TCP socket
-	if ((s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == SOCKET_ERROR)
+	//create UDP socket
+	if ((s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == SOCKET_ERROR)
 	{
-		printf("TCP socket() failed with error code : %d", WSAGetLastError());
+		printf("UDP socket() failed with error code : %d", WSAGetLastError());
 		exit(EXIT_FAILURE);
 	}
 
-	struct timeval tv; 
-	tv.tv_sec = 5000; // time out 10 seconds
-	tv.tv_usec = 0;
-
-	if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv, sizeof tv))
-	{
-		printf("setsockopt() failed with error code : %d", WSAGetLastError());
-		exit(EXIT_FAILURE);
-	}
-
-
-	if (connect(s, (SOCKADDR*)(&si_other), sizeof(si_other)) != 0) {
-		cout << "Could not connect";
-		system("pause");
-		return 1;
-	}
-
+	
 	//start communication
 	printf("Waiting for button trigger : ");
 
@@ -135,30 +101,44 @@ int main(int argc, char* argv[])
 	{
 		if (key_pressed(VK_F4))
 		{
-			printf("Firing data sending\n");
+			printf("Firing data sending for 5 seconds\n");
 
+			HANDLE hTimer = NULL;
+			LARGE_INTEGER liDueTime;
 
-			//send the stream
-			if (send(s, put_string, strlen(put_string), 0) == SOCKET_ERROR)
+			liDueTime.QuadPart = -50000000;
+
+			// Create a waitable timer.
+			hTimer = CreateWaitableTimer(NULL, TRUE, NULL);
+			if (NULL == hTimer)
 			{
-				printf("sendto() failed with error code : %d", WSAGetLastError());
-				exit(EXIT_FAILURE);
+				printf("CreateWaitableTimer failed (%d)\n", GetLastError());
+				exit(EXIT_FAILURE);;
 			}
 
-			char buffer[10000];
-			int nDataLength = 0;
-			while ((nDataLength = recv(s, buffer, 10000, 0)) > 0) {
-				int i = 0;
-				while (buffer[i] >= 32 || buffer[i] == '\n' || buffer[i] == '\r') {
-					cout << buffer[i];
-					i += 1;
+
+			// Set a timer to wait for 10 seconds.
+			if (!SetWaitableTimer(hTimer, &liDueTime, 0, NULL, NULL, 0))
+			{
+				printf("SetWaitableTimer failed (%d)\n", GetLastError());
+				exit(EXIT_FAILURE);;
+			}
+
+			memset(buf, 0xaa, BUFLEN);
+
+			while (WaitForSingleObject(hTimer, 500) != WAIT_OBJECT_0)
+			{
+
+				//send the stream
+				if (sendto(s, buf, sizeof(buf), 0, (struct sockaddr *) &si_other, slen) == SOCKET_ERROR)
+				{
+					printf("sendto() failed with error code : %d", WSAGetLastError());
+					exit(EXIT_FAILURE);
 				}
 			}
 
 			printf("Waiting for button trigger : ");
-
 		}
-
 	}
 
 	closesocket(s);
